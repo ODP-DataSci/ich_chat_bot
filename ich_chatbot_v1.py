@@ -9,6 +9,8 @@ import os
 import openai
 import time
 from packaging import version
+import string
+
 
 #cfg = get_cfg()    
 #cfg.MODEL.DEVICE = 'cpu' #GPU is recommended
@@ -33,6 +35,14 @@ client = []
 
 st.set_page_config(page_title="ICH Guidelines Chat")
 
+def remove_punctuation(input_string):
+    # Make a translation table that maps all punctuation characters to None
+    translator = str.maketrans("", "", string.punctuation)
+
+    # Apply the translation table to the input string
+    result = input_string.translate(translator)
+
+    return result
 
 def list_assistants():
 
@@ -98,8 +108,8 @@ def generate_response(thread, user_input, client):
         message_return += response_divider[i]
         #print(file_ids[0:20])
         #print(len(file_ids[l_s[i]:l_e[i]]))
-        print(assistant_id)
-        print(file_ids[l_s[i]:l_e[i]])
+        #print(assistant_id)
+        #print(file_ids[l_s[i]:l_e[i]])
         assistant_id = update_assistant(assistant_id, file_ids[l_s[i]:l_e[i]], client)
         
         
@@ -128,7 +138,7 @@ def generate_response(thread, user_input, client):
                 thread_id=thread.id,
                 run_id=run.id
             )
-            print(run_status)
+            #print(run_status)
             run_status = run.status 
 
         message_obj = client.beta.threads.messages.list(
@@ -218,20 +228,21 @@ with st.container():
                 st.session_state['thread'] = create_thread(client)
             if 'assistant' not in st.session_state: 
                 st.session_state['assistant'] = get_assistant_by_id('asst_B7236998FIWQgUzuM5b9OIWB', client)
-            prompt_plus = prompt+" according to the ich guidelines"
-            responses = generate_response(st.session_state.thread, prompt, client)
+            prompt_plus = remove_punctuation(prompt) + " according to the ich guidelines"
+            
             #st.session_state.generated.append(responses) #Add model output to storage
-            print(responses)
+            #print(responses)
             with st.chat_message("user"):
                 st.markdown(prompt)
 
+            responses = generate_response(st.session_state.thread, prompt_plus, client)
             with st.chat_message("assistant"):
                 message_placeholder = st.empty()
                 full_response = ""
 
                 for response in responses.split():
                     full_response += response + " "
-                    time.sleep(0.05)
+                    time.sleep(0.01)
                     message_placeholder.markdown(full_response + "▌")
                 message_placeholder.markdown(full_response)
             st.session_state.messages.append({"role": "assistant", "content": full_response})
