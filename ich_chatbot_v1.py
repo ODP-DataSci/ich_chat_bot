@@ -29,10 +29,7 @@ from openai import OpenAI
 os.environ["ORGANIZATION_KEY"] = ""
 os.environ["OPENAI_API_KEY"] = ""
 
-client = OpenAI(
-  organization=os.environ["ORGANIZATION_KEY"],
-  api_key=os.environ["OPENAI_API_KEY"],
-)
+client = []
 
 st.set_page_config(page_title="ICH Guidelines Chat")
 
@@ -47,7 +44,7 @@ def select_assistant(assistant_id):
     assistant = client.beta.assistants.retrieve(assistant_id)
     return assistant.id
 
-def update_assistant(assistant_id, file_ids):
+def update_assistant(assistant_id, file_ids, client):
     assistant = client.beta.assistants.update(assistant_id, file_ids=file_ids)
     return assistant.id
 
@@ -60,16 +57,16 @@ def create_assistant(name, instructions, tools, model):
     )
     return assistant.id  # Return the assistant ID
 
-def get_assistant_by_id(assistant_id):
+def get_assistant_by_id(assistant_id,client):
     assistant = client.beta.assistants.retrieve(assistant_id)
     return assistant.id
 
-def create_thread():
+def create_thread(client):
     
     thread = client.beta.threads.create()
     return thread
 
-def generate_response(thread, user_input):
+def generate_response(thread, user_input, client):
     """
     Function designed to generate the next response from a chat history containing messages from
     both the user and the agent.
@@ -85,15 +82,27 @@ def generate_response(thread, user_input):
         The latest response from the model.
     """
     file_ids = st.session_state.files
+    file_ids = file_ids[0]
     assistant_id = st.session_state.assistant
 
     message_return = ""
     file_lists = [file_ids[:20],file_ids[20:40],file_ids[40:]]
-    response_divider = ["Response for files 1-20\n\n", "Response for files 20-40\n\n", "Response for files 40-50\n\n"]
-    
+    response_divider = [''':red[***Response for files 1-20***]  
+    ''', ''':red[***Response for files 20-40***]  
+    ''', ''':red[***Response for files 40-50***]  
+    ''']
+    #print("generating a response")
+    l_s = [1,21,41]
+    l_e = [21,41,None]
     for i in [0,1,2]:
         message_return += response_divider[i]
-        assistant_id = update_assistant(assistant_id, file_lists[i])
+        #print(file_ids[0:20])
+        #print(len(file_ids[l_s[i]:l_e[i]]))
+        print(assistant_id)
+        print(file_ids[l_s[i]:l_e[i]])
+        assistant_id = update_assistant(assistant_id, file_ids[l_s[i]:l_e[i]], client)
+        
+        
         message_obj = client.beta.threads.messages.create(
             thread_id = thread.id,
             role = "user",
@@ -115,6 +124,11 @@ def generate_response(thread, user_input):
             if run_status in ["completed", 'failed']:
                 break
             time.sleep(1)
+            run = client.beta.threads.runs.retrieve(
+                thread_id=thread.id,
+                run_id=run.id
+            )
+            print(run_status)
             run_status = run.status 
 
         message_obj = client.beta.threads.messages.list(
@@ -144,18 +158,17 @@ if 'past' not in st.session_state:
     st.session_state['past'] = [] #Used to store the user's prompts
 
 if 'files' not in st.session_state:
-    file = open("file_ids.csv", "r")
+    file = open("file_ids_v2.csv", "r")
     data = list(csv.reader(file, delimiter=","))
     file.close()
     st.session_state['files'] = data
 
-if 'thread' not in st.session_state and ('OpenAIPass' in st.secrets) and ('OrganizationPass' in st.secrets):
-    thread = create_thread()
-    st.session_state['thread'] = thread.id
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-if 'assistant' not in st.session_state and ('OpenAIPass' in st.secrets) and ('OrganizationPass' in st.secrets):
-    assistant = get_assistant_by_id('asst_5jdAAajRyTLPX7r3pLC3YAlK')
-    st.session_state['assistant'] = assistant
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
 with st.sidebar:
     st.title('ICH Guidelines Chat')
@@ -185,21 +198,61 @@ with st.sidebar:
                 st.success('Proceed to entering your prompt message!', icon='👉')
 
 
-input_container = st.container()
-colored_header(label='', description='', color_name='blue-30')
-response_container = st.container()
+#colored_header(label='', description='', color_name='blue-30')
+#response_container = st.container()
 
 
-with input_container:
-    user_input = get_text()
+with st.container():
 
-with response_container:
-    if user_input:
-        st.session_state.past.append(user_input) #Add user input to storage
-        response = generate_response(st.session_state.thread, user_input)
-        st.session_state.generated.append(response) #Add model output to storage
+    #user_input = get_text()
+    if prompt := st.chat_input("What is up?"):
+        st.session_state.messages.append({"role": "user", "content": prompt})
         
-    if st.session_state['generated']:
-        for i in range(len(st.session_state['generated'])):
-            message(st.session_state['past'][i], is_user=True, key=str(i) + '_user')
-            message(st.session_state["generated"][i], key=str(i))
+        if (os.environ["ORGANIZATION_KEY"] != "") and (os.environ["OPENAI_API_KEY"] != ""):
+            if client == []:
+                client = OpenAI(
+                    organization=os.environ["ORGANIZATION_KEY"],
+                    api_key=os.environ["OPENAI_API_KEY"],
+                )
+            if "thread" not in st.session_state:
+                st.session_state['thread'] = create_thread(client)
+            if 'assistant' not in st.session_state: 
+                st.session_state['assistant'] = get_assistant_by_id('asst_B7236998FIWQgUzuM5b9OIWB', client)
+            prompt_plus = prompt+" according to the ich guidelines"
+            responses = generate_response(st.session_state.thread, prompt, client)
+            #st.session_state.generated.append(responses) #Add model output to storage
+            print(responses)
+            with st.chat_message("user"):
+                st.markdown(prompt)
+
+            with st.chat_message("assistant"):
+                message_placeholder = st.empty()
+                full_response = ""
+
+                for response in responses.split():
+                    full_response += response + " "
+                    time.sleep(0.05)
+                    message_placeholder.markdown(full_response + "▌")
+                message_placeholder.markdown(full_response)
+            st.session_state.messages.append({"role": "assistant", "content": full_response})
+        else:
+            st.warning('Please enter Open AI key and Organization key', icon="⚠️")
+
+# with response_container:
+#     if user_input:
+#         st.session_state.past.append(user_input) #Add user input to storage
+#         if ('OrganizationPass' in st.secrets) and ('OpenAIPass' in st.secrets):
+#             if "thread" not in st.session_state:
+#                 st.session_state['thread'] = create_thread()
+#             if 'assistant' not in st.session_state: 
+#                 st.session_state['assistant'] = get_assistant_by_id('asst_5jdAAajRyTLPX7r3pLC3YAlK')
+#             response = generate_response(st.session_state.thread, user_input)
+#             st.session_state.generated.append(response) #Add model output to storage
+#         else:
+#             response = "Please enter AI key and Organization key"
+#             st.session_state.generated.append(response) #Add model output to storage
+        
+#     if st.session_state['generated']:
+#         for i in range(len(st.session_state['generated'])):
+#             message(st.session_state['past'][i], is_user=True, key=str(i) + '_user')
+#             message(st.session_state["generated"][i], key=str(i))
